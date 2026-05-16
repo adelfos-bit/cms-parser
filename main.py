@@ -96,6 +96,22 @@ def parse_with_claude(text: str) -> dict:
     except Exception as ex:
         return {"_debug": response_text[:200], "_error": str(ex)}
 
+
+@app.get("/test-claude")
+def test_claude():
+    if not ANTHROPIC_API_KEY:
+        return {"error": "API key not set", "key_length": 0}
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=50,
+            messages=[{"role": "user", "content": "say hi in JSON: {"hi": true}"}]
+        )
+        return {"success": True, "response": msg.content[0].text, "key_length": len(ANTHROPIC_API_KEY)}
+    except Exception as e:
+        return {"error": str(e), "key_length": len(ANTHROPIC_API_KEY)}
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
