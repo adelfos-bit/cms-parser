@@ -34,30 +34,24 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
         os.unlink(tmp_path)
 
 def extract_text_from_hwp(file_bytes: bytes) -> str:
-    with tempfile.NamedTemporaryFile(suffix=".hwp", delete=False) as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
     try:
-        result = subprocess.run(
-            ["hwp5txt", tmp_path],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout
-        # fallback: 바이너리에서 한글/영문 텍스트 추출
         text = file_bytes.decode("utf-16-le", errors="ignore")
+        # 의미있는 한글/영문/숫자만 추출
+        import re
+        # 꺾쇠 안의 내용 추출
+        chunks = re.findall(r"<([^<>]{1,50})>", text)
+        meaningful = []
+        for chunk in chunks:
+            chunk = chunk.strip().replace(" ", "")
+            if chunk and len(chunk) > 1:
+                meaningful.append(chunk)
+        if meaningful:
+            return "\n".join(meaningful)
+        # fallback
         cleaned = "".join(c for c in text if c.isprintable() or c in "\n\t ")
         return cleaned
-    except Exception as e:
-        # fallback
-        try:
-            text = file_bytes.decode("utf-16-le", errors="ignore")
-            cleaned = "".join(c for c in text if c.isprintable() or c in "\n\t ")
-            return cleaned
-        except:
-            return ""
-    finally:
-        os.unlink(tmp_path)
+    except:
+        return ""
 
 def parse_with_claude(text: str) -> dict:
     if not ANTHROPIC_API_KEY:
