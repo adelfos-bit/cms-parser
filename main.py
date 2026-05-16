@@ -1,20 +1,13 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import anthropic
-import fitz  # PyMuPDF
-from docx import Document
-import tempfile
 import os
 import json
+import tempfile
+import subprocess
+import anthropic
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from docx import Document
+import fitz
 
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
@@ -24,10 +17,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         tmp_path = tmp.name
     try:
         doc = fitz.open(tmp_path)
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        doc.close()
+        text = "\n".join([page.get_text() for page in doc])
         return text
     finally:
         os.unlink(tmp_path)
@@ -44,24 +34,40 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
         os.unlink(tmp_path)
 
 def extract_text_from_hwp(file_bytes: bytes) -> str:
+    with tempfile.NamedTemporaryFile(suffix=".hwp", delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
     try:
-        text = file_bytes.decode("utf-8", errors="ignore")
+        result = subprocess.run(
+            ["hwp5txt", tmp_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout
+        # fallback: 바이너리에서 한글/영문 텍스트 추출
+        text = file_bytes.decode("utf-16-le", errors="ignore")
         cleaned = "".join(c for c in text if c.isprintable() or c in "\n\t ")
         return cleaned
-    except:
-        return ""
+    except Exception as e:
+        # fallback
+        try:
+            text = file_bytes.decode("utf-16-le", errors="ignore")
+            cleaned = "".join(c for c in text if c.isprintable() or c in "\n\t ")
+            return cleaned
+        except:
+            return ""
+    finally:
+        os.unlink(tmp_path)
 
 def parse_with_claude(text: str) -> dict:
     if not ANTHROPIC_API_KEY:
         return {}
-    
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    
     prompt = f"""다음은 이력서 텍스트입니다. 아래 정보를 추출해서 JSON으로만 응답해주세요.
 다른 설명 없이 JSON만 반환하세요.
 
 {{
-  "name": "성명",
+  "name": "성명 (한글 이름)",
   "phone": "휴대전화번호 (숫자와 하이픈만)",
   "birth_date": "생년월일 (YYYY-MM-DD 형식)",
   "address": "주소",
@@ -72,6 +78,8 @@ def parse_with_claude(text: str) -> dict:
   "position": "직책"
 }}
 
+찾을 수 없는 항목은 빈 문자열로 반환하세요.
+
 이력서 텍스트:
 {text[:3000]}"""
 
@@ -80,9 +88,9 @@ def parse_with_claude(text: str) -> dict:
         max_tokens=1000,
         messages=[{"role": "user", "content": prompt}]
     )
-    
+
     response_text = message.content[0].text.strip()
-    
+
     try:
         if "```" in response_text:
             response_text = response_text.split("```")[1]
@@ -101,7 +109,7 @@ async def parse_file(file: UploadFile = File(...)):
     try:
         file_bytes = await file.read()
         filename = file.filename.lower()
-        
+
         if filename.endswith(".pdf"):
             text = extract_text_from_pdf(file_bytes)
         elif filename.endswith(".docx"):
@@ -110,12 +118,12 @@ async def parse_file(file: UploadFile = File(...)):
             text = extract_text_from_hwp(file_bytes)
         else:
             raise HTTPException(status_code=400, detail="지원하지 않는 파일 형식")
-        
+
         if not text.strip():
             return {"success": False, "message": "텍스트 추출 실패", "data": {}}
-        
+
         parsed = parse_with_claude(text)
-        
+
         return {
             "success": True,
             "data": parsed,
