@@ -93,8 +93,8 @@ def parse_with_claude(text: str) -> dict:
             if response_text.startswith("json"):
                 response_text = response_text[4:]
         return json.loads(response_text)
-    except:
-        return {}
+    except Exception as ex:
+        return {"_debug": response_text[:200], "_error": str(ex)}
 
 @app.get("/health")
 def health():
