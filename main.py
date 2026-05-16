@@ -106,7 +106,7 @@ def test_claude():
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=50,
-            messages=[{"role": "user", "content": "say hi in JSON: {"hi": true}"}]
+            messages=[{"role": "user", "content": "say hi in JSON format"}]
         )
         return {"success": True, "response": msg.content[0].text, "key_length": len(ANTHROPIC_API_KEY)}
     except Exception as e:
